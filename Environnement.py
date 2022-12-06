@@ -44,6 +44,10 @@ class Player(pygame.sprite.Sprite):
                             if self.is_hit(b.rect) and b.has_hit == False:
                                 self.perd_vie(e.damage)
                                 b.has_hit = True
+                    if e.type == "mamooth":
+                        if self.is_hit(e.rect) and e.has_hit == False:
+                            self.perd_vie(e.damage)
+                            e.has_hit = True
 
 
 class Runner(pygame.sprite.Sprite):
@@ -88,6 +92,73 @@ class Runner(pygame.sprite.Sprite):
                 self.is_dead()
         else:
             self.is_dead()
+
+class Mamooth(pygame.sprite.Sprite):
+
+    def __init__(self, x, y, rarity="normal", pv=100):
+        super().__init__()
+        self.type = "mamooth"
+        self.rarity = rarity
+        self.pv = pv
+        self.image = pygame.Surface((50, 50))
+        if self.rarity == "normal":
+            self.color = "grey"
+        elif self.rarity == "rare":
+            self.color = "cyan"
+        elif self.rarity == "ultra":
+            self.color = "magenta"
+        else:
+            self.color = "grey"
+        self.image.fill(self.color)
+        self.speed = 1
+        self.pos = Vector2(x,y)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.velocity = Vector2(self.speed, 0)
+        self.velocity.rotate_ip(get_Player_Angle(game.player, self))
+        self.has_hit = False
+        self.damage = 20
+
+    def ennemi_perd_vie(self, pv):
+        self.pv -= pv
+
+    def is_hit(self, bulletrect):
+        if self.rect.colliderect(bulletrect):
+            return True
+        else:
+            return False
+
+    def is_dead(self):
+        self.kill()
+
+    def update(self):
+
+        if 0 <= self.pos[0] <= 1920 and 0 <= self.pos[1] <= 1080:
+            self.pos += self.velocity
+            self.rect.center = self.pos
+            for b in game.player_bullets:
+                if self.is_hit(b.rect) and b.has_hit == False:
+                    self.ennemi_perd_vie(game.player.damage)
+                    b.has_hit = True
+            if self.pv <= 0:
+                if self.rarity == "normal":
+                    game.score += 10
+                    if random() <= 0.3:
+                        game.pmunitions += 10
+                        game.pshoot_cooldown -= 20
+                elif self.rarity == "rare":
+                    game.score += 20
+                    if random() <= 0.6:
+                        game.pmunitions += 20
+                        game.pshoot_cooldown -= 40
+                elif self.rarity == "ultra":
+                    game.score += 50
+                    if random() <= 0.9:
+                        game.pmunitions += 30
+                        game.pshoot_cooldown -= 80
+                self.is_dead()
+        else:
+            self.is_dead()
+
 
 class Shooter(pygame.sprite.Sprite):
     def __init__(self, x, y, color="orange", pv=10):
@@ -164,6 +235,13 @@ class EnnemiSpawner:
             return ennemi_type(randint(self.firstx, self.endx), randint(self.firsty, self.endy))
         elif ennemi_type == Shooter:
             return ennemi_type(randint(250, game.screen_width - 250), randint(140, game.screen_height - 140))
+        elif ennemi_type == Mamooth:
+            if random() <= 0.4:
+                return ennemi_type(randint(self.firstx, self.endx), randint(self.firsty, self.endy), "rare")
+            elif random() <= 0.1:
+                return ennemi_type(randint(self.firstx, self.endx), randint(self.firsty, self.endy), "ultra")
+            else:
+                return ennemi_type(randint(self.firstx, self.endx), randint(self.firsty, self.endy), "normal")
 
     def spawn(self, ennemi_type):
         time1 = pygame.time.get_ticks()
@@ -173,7 +251,7 @@ class EnnemiSpawner:
 
 class Gun(pygame.sprite.Sprite):
 
-    def __init__(self, player, pos):
+    def __init__(self, player, pos, cooldown, munitions):
         super().__init__()
         # player related
         self.player = player
@@ -191,10 +269,10 @@ class Gun(pygame.sprite.Sprite):
         self.bullets_speed = 15
         # cooldown
         self.time0 = pygame.time.get_ticks()
-        self.shoot_cooldown = 250
+        self.shoot_cooldown = cooldown
         self.reload_cooldown = 3000
         self.IsShooting = False
-        self.munitions = 50
+        self.munitions = munitions
         self.out_of_ammo = False
 
     def rotate(self):
@@ -218,18 +296,19 @@ class Gun(pygame.sprite.Sprite):
     def reload(self, screen):
         self.out_of_ammo = True
         screen.blit(self.reload_text, self.reload_text_rect)
-        self.reload_text_rect = self.reload_text.get_rect(center=(self.rect.centerx, self.rect.centery - 20))
+        self.reload_text_rect = self.reload_text.get_rect(center=(self.pos[0], self.pos[1] - 20))
         time1 = pygame.time.get_ticks()
         if time1 - self.time0 >= self.reload_cooldown:
-            self.munitions = 50
+            self.munitions = game.pmunitions
             self.out_of_ammo = False
 
     def update(self, screen):
         self.pos = Vector2(game.player.rect.center)
         self.angle = get_mouse_Angle(self)
         self.rotate()
+        self.shoot_cooldown = game.pshoot_cooldown
         if self.munitions <= 0:
-            self.reload(screen)
+            self.reload(game.screen)
 
 class Bullet(pygame.sprite.Sprite):
 
@@ -302,9 +381,13 @@ class Game:
         self.running = True
         self.state = "main"
         self.player = Player(self.screen_width / 2, self.screen_height / 2)
-        self.pgun = Gun(self.player, self.player.rect.center)
-        self.player_gun = pygame.sprite.Group(self.pgun)
+        self.pshoot_cooldown = 250
+        self.pmunitions = 50
         self.player_bullets = pygame.sprite.Group()
+        self.pgun = Gun(self.player, self.player.rect.center, self.pshoot_cooldown, self.pmunitions)
+        self.player_gun = pygame.sprite.Group(self.pgun)
+
+
 
         # ========================
         self.player_pv_font = pygame.font.SysFont(None, 25)
@@ -329,7 +412,8 @@ class Game:
 
         self.runner_spawners = []
         self.shooter_spawners =[]
-        self.spawners = [self.runner_spawners, self.shooter_spawners]
+        self.mamooth_spawners = []
+        self.spawners = [self.runner_spawners, self.shooter_spawners, self.mamooth_spawners]
         self.shooterspawntime = 5000
         self.runnerspawntime = 3000
 
@@ -343,6 +427,8 @@ class Game:
         self.shooter_spawner1 = EnnemiSpawner(0, self.screen_width, 0, 0, self.shooterspawntime)
         self.shooter_spawners.append(self.shooter_spawner1)
         # =======================
+        self.mamooth_spawner1 = EnnemiSpawner(0, self.screen_width, 0, 0, randint(20000, 40000))
+        self.mamooth_spawners.append(self.mamooth_spawner1)
 
         self.timer = pygame.time.get_ticks()
         self.score = 0
@@ -393,6 +479,10 @@ class Game:
         if keys[pygame.K_ESCAPE]:
             self.running = False
 
+
+
+        self.screen.fill("black")
+
     # update
         # make spawners spawn enemies
         time1 = pygame.time.get_ticks()
@@ -413,7 +503,10 @@ class Game:
             s.spawn(Runner)
         if self.score >= 30:
             for s in game.shooter_spawners:
-                s.spawn(Shooter)
+                if len(s.ennemis) <= 3:
+                    s.spawn(Shooter)
+        for m in game.mamooth_spawners:
+            m.spawn(Mamooth)
         self.player.update()
         self.pgun.update(self.screen)
         game.player_bullets.update()
@@ -425,7 +518,7 @@ class Game:
             self.meilleur_score = self.score
 
     # display
-        self.screen.fill("black")
+
         self.screen.blit(self.crosshair, pygame.mouse.get_pos())
         self.screen.blit(self.player.image, self.player.rect)
         # display gun and bullets
@@ -440,6 +533,7 @@ class Game:
         self.player_pv_text = self.player_pv_font.render(f"PV: {self.player.pv}", True, "green")
         self.screen.blit(self.score_text, self.score_text_rect)
         self.score_text = self.score_font.render(f"SCORE: {self.score}", True, "gold")
+
 
 
         pygame.display.flip()
